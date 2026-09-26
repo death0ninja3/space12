@@ -1,0 +1,2050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stellar Mission Planner | NASA/JPL Interstellar Flight Dynamics</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            hud: ['Orbitron', 'sans-serif'],
+            sans: ['Space Grotesk', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            deepSpace: '#030712',
+            hudCyan: '#00f0ff',
+            hudCyanDim: 'rgba(0, 240, 255, 0.15)',
+            hudAmber: '#f59e0b',
+            hudMagenta: '#ec4899',
+            hudGreen: '#10b981',
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- External 3D Libraries & Animation Engine -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+
+  <style>
+    body {
+      background-color: #030712;
+      overflow: hidden;
+      user-select: none;
+      color: #f1f5f9;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(3, 7, 18, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(0, 240, 255, 0.35);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 240, 255, 0.8);
+    }
+
+    /* Glassmorphism Panel */
+    .glass-hud {
+      background: rgba(8, 15, 30, 0.85);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(0, 240, 255, 0.22);
+      box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.85), inset 0 0 15px rgba(0, 240, 255, 0.05);
+    }
+
+    /* Sci-Fi Corner Brackets */
+    .hud-brackets {
+      position: relative;
+    }
+    .hud-brackets::before {
+      content: '';
+      position: absolute;
+      top: -1px; left: -1px;
+      width: 10px; height: 10px;
+      border-top: 2px solid #00f0ff;
+      border-left: 2px solid #00f0ff;
+      pointer-events: none;
+    }
+    .hud-brackets::after {
+      content: '';
+      position: absolute;
+      bottom: -1px; right: -1px;
+      width: 10px; height: 10px;
+      border-bottom: 2px solid #00f0ff;
+      border-right: 2px solid #00f0ff;
+      pointer-events: none;
+    }
+
+    /* Scanline Overlay */
+    .scanlines {
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+      background-size: 100% 4px, 6px 100%;
+      pointer-events: none;
+    }
+
+    /* Range slider inputs */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 9999px;
+      height: 4px;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #00f0ff;
+      cursor: pointer;
+      box-shadow: 0 0 10px #00f0ff;
+      border: 2px solid #ffffff;
+      transition: transform 0.1s ease;
+    }
+    input[type=range]::-webkit-slider-thumb:hover {
+      transform: scale(1.25);
+    }
+
+    .planet-card {
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .planet-card:hover {
+      transform: translateX(4px);
+      border-color: rgba(0, 240, 255, 0.6);
+      background: rgba(0, 240, 255, 0.08);
+    }
+    .planet-card.selected {
+      border-color: #00f0ff;
+      background: rgba(0, 240, 255, 0.15);
+      box-shadow: 0 0 18px rgba(0, 240, 255, 0.25);
+    }
+  </style>
+</head>
+
+<body class="w-screen h-screen font-sans">
+  <!-- 3D Canvas Viewport -->
+  <div id="canvas-container" class="absolute inset-0 w-full h-full z-0 cursor-grab active:cursor-grabbing"></div>
+  <div class="scanlines absolute inset-0 z-10"></div>
+
+  <!-- Header Section -->
+  <header class="absolute top-3 left-3 right-3 z-30 flex items-center justify-between px-4 py-2.5 glass-hud rounded-lg hud-brackets">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded bg-cyan-950/80 border border-hudCyan flex items-center justify-center text-hudCyan shadow-[0_0_12px_rgba(0,240,255,0.4)]">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor"/></svg>
+      </div>
+      <div>
+        <div class="flex items-center space-x-2">
+          <h1 class="font-hud font-bold text-sm tracking-widest text-white uppercase flex items-center gap-2">
+            STELLAR MISSION PLANNER
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-hudCyan/20 text-hudCyan border border-hudCyan/40 font-mono">v3.5_VERIFIED</span>
+          </h1>
+        </div>
+        <p class="text-[10px] text-slate-400 font-mono tracking-tight hidden sm:block">
+          Autonomous Interstellar Trajectory, Relativistic Rocket Dynamics & Exoplanet Synthesizer
+        </p>
+      </div>
+    </div>
+
+    <!-- Center Quick Status Indicator -->
+    <div class="hidden lg:flex items-center space-x-6 text-xs font-mono">
+      <div class="flex items-center space-x-1.5">
+        <span class="w-2 h-2 rounded-full bg-hudCyan animate-ping"></span>
+        <span class="text-slate-400">ORIGIN:</span>
+        <span class="text-white font-semibold">SOL-EARTH (0.00 LY)</span>
+      </div>
+      <div class="flex items-center space-x-1.5">
+        <svg class="w-3.5 h-3.5 text-hudAmber" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+        <span class="text-slate-400">TARGET:</span>
+        <span id="nav-target-name" class="text-hudAmber font-bold">Proxima Centauri b</span>
+      </div>
+      <div class="flex items-center space-x-1.5">
+        <svg class="w-3.5 h-3.5 text-hudGreen" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" stroke-width="2" stroke-linejoin="round"/></svg>
+        <span class="text-slate-400">PROPULSION:</span>
+        <span id="nav-propulsion-mode" class="text-hudGreen font-semibold">Beamed Laser Lightsail</span>
+      </div>
+    </div>
+
+    <!-- Actions & Tour Trigger -->
+    <div class="flex items-center space-x-2">
+      <div class="hidden md:flex items-center bg-black/40 border border-white/10 rounded p-0.5 text-[11px] font-mono">
+        <button id="cam-earth-btn" class="px-2 py-1 rounded hover:bg-hudCyan/20 text-slate-300 hover:text-white transition">Earth</button>
+        <button id="cam-probe-btn" class="px-2 py-1 rounded hover:bg-hudCyan/20 text-slate-300 hover:text-white transition">Spacecraft</button>
+        <button id="cam-target-btn" class="px-2 py-1 rounded hover:bg-hudCyan/20 text-slate-300 hover:text-white transition">Destination</button>
+        <button id="cam-overview-btn" class="px-2 py-1 rounded hover:bg-hudCyan/20 text-slate-300 hover:text-white transition">Overview</button>
+      </div>
+
+      <button id="btn-open-math" class="px-2.5 py-1 rounded bg-black/40 border border-hudCyan/40 hover:bg-hudCyan/20 text-hudCyan font-mono text-xs flex items-center gap-1.5 transition">
+        <span>Σ</span>
+        <span class="hidden sm:inline">FORMULAS</span>
+      </button>
+
+      <button id="btn-toggle-sound" class="p-1.5 rounded bg-black/40 border border-white/10 hover:border-hudCyan text-slate-300 hover:text-hudCyan transition" title="Sound Effects">
+        <span id="sound-icon-box">
+          <svg class="w-4 h-4 text-hudCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" stroke-width="2"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" stroke-width="2"/></svg>
+        </span>
+      </button>
+
+      <button id="btn-start-presentation" class="relative group px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 via-sky-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-hud font-bold text-xs tracking-wider flex items-center gap-2 shadow-[0_0_20px_rgba(0,240,255,0.4)] transition-all transform hover:scale-105 active:scale-95">
+        <svg class="w-4 h-4 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
+        <span>PRESENTATION TOUR</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Target Catalog Sidebar (Left) -->
+  <aside class="absolute top-16 left-3 bottom-24 w-72 md:w-80 glass-hud rounded-lg flex flex-col z-20 hud-brackets overflow-hidden">
+    <div class="p-3 border-b border-white/10 flex items-center justify-between bg-black/30">
+      <div class="flex items-center space-x-2">
+        <svg class="w-4 h-4 text-hudCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3" stroke-width="2"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" stroke-width="2"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" stroke-width="2"/></svg>
+        <h2 class="font-hud font-semibold text-xs tracking-wider uppercase text-white">NExScI TARGET CATALOG</h2>
+      </div>
+      <span class="text-[9px] font-mono bg-hudCyan/20 text-hudCyan px-1.5 py-0.5 rounded border border-hudCyan/30">6 VERIFIED</span>
+    </div>
+
+    <div class="px-3 py-1.5 bg-black/20 border-b border-white/5 text-[10px] font-mono text-slate-400 flex justify-between">
+      <span>REF CATALOG: <strong class="text-white">NASA Eyes 2026</strong></span>
+      <span>COORDINATE: <strong class="text-hudCyan">ICRS J2000</strong></span>
+    </div>
+
+    <div id="planet-catalog" class="flex-1 overflow-y-auto p-2.5 space-y-2">
+      <!-- Injected via JavaScript -->
+    </div>
+
+    <div class="p-3 border-t border-white/10 bg-black/50 font-mono text-xs">
+      <div class="flex justify-between items-center text-[11px] mb-1">
+        <span class="text-slate-400">ACTIVE TARGET:</span>
+        <span id="target-quick-name" class="font-hud font-bold text-hudAmber">Proxima Centauri b</span>
+      </div>
+      <div class="grid grid-cols-2 gap-1 text-[10px] text-slate-300">
+        <div>Distance: <span id="target-quick-dist" class="text-hudCyan font-bold">4.2465 LY</span></div>
+        <div>Teq: <span id="target-quick-temp" class="text-white">234 K</span></div>
+        <div>Habitable Zone: <span id="target-quick-hz" class="text-hudGreen font-bold">CONFIRMED</span></div>
+        <div>Mass: <span id="target-quick-mass" class="text-white">1.07 M⊕</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Mission Dynamics & Specs Sidebar (Right) -->
+  <aside class="absolute top-16 right-3 bottom-24 w-80 md:w-96 glass-hud rounded-lg flex flex-col z-20 hud-brackets overflow-hidden">
+    <div class="p-3 border-b border-white/10 flex items-center justify-between bg-black/30">
+      <div class="flex items-center space-x-2">
+        <svg class="w-4 h-4 text-hudCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14" stroke-width="2"/><line x1="4" y1="10" x2="4" y2="3" stroke-width="2"/><line x1="12" y1="21" x2="12" y2="12" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="3" stroke-width="2"/><line x1="20" y1="21" x2="20" y2="16" stroke-width="2"/><line x1="20" y1="12" x2="20" y2="3" stroke-width="2"/><line x1="1" y1="14" x2="7" y2="14" stroke-width="2"/><line x1="9" y1="8" x2="15" y2="8" stroke-width="2"/><line x1="17" y1="16" x2="23" y2="16" stroke-width="2"/></svg>
+        <h2 class="font-hud font-semibold text-xs tracking-wider uppercase text-white">MISSION DYNAMICS & SPECS</h2>
+      </div>
+      <span class="text-[9px] font-mono bg-amber-500/20 text-hudAmber px-1.5 py-0.5 rounded border border-hudAmber/30">PHYSICS ENGINE</span>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-3.5 space-y-3.5 font-mono text-xs">
+      <!-- Flight Profile -->
+      <div>
+        <label class="block text-[10px] uppercase text-slate-400 mb-1">Flight Profile & Maneuver</label>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="profile-flyby" class="py-1.5 px-2 rounded border border-hudCyan bg-hudCyan/20 text-white font-bold text-center text-[11px] transition flex items-center justify-center gap-1">
+            <span>➔</span> FLYBY
+          </button>
+          <button id="profile-orbit" class="py-1.5 px-2 rounded border border-white/10 bg-black/40 text-slate-400 hover:text-white font-bold text-center text-[11px] transition flex items-center justify-center gap-1">
+            <span>↺</span> ORBIT INSERTION
+          </button>
+        </div>
+        <p id="profile-desc" class="text-[9px] text-slate-400 mt-1">
+          High-velocity hyperbolic pass. No deceleration propellant required.
+        </p>
+      </div>
+
+      <!-- Propulsion System Selector -->
+      <div>
+        <div class="flex justify-between items-center mb-1">
+          <label class="text-[10px] uppercase text-slate-400">Propulsion Architecture</label>
+          <span id="propulsion-isp-tag" class="text-[9px] text-hudCyan">Isp: Photonic (Inf)</span>
+        </div>
+        <select id="propulsion-select" class="w-full bg-black/80 border border-white/20 rounded p-1.5 text-white focus:outline-none focus:border-hudCyan text-xs cursor-pointer">
+          <option value="lightsail">Beamed Laser Lightsail (Breakthrough Starshot)</option>
+          <option value="antimatter">Antimatter-Catalyzed Fusion Rocket</option>
+          <option value="daedalus">Project Daedalus Pulsed Fusion (D-He3)</option>
+          <option value="dfd">Direct Fusion Drive (Field-Reversed)</option>
+          <option value="ion_adv">High-Power Relativistic Ion Clustered Array</option>
+          <option value="chemical_trap">Chemical Bipropellant (Physical Impossibility Trap)</option>
+        </select>
+        <p id="propulsion-desc" class="text-[9px] text-slate-400 mt-1 leading-snug p-2 rounded bg-black/40 border border-white/5">
+          Ground-based 100GW phased laser array pushes ultra-reflective sail to 0.20c without on-board propellant weight.
+        </p>
+      </div>
+
+      <!-- Cruising Velocity Slider -->
+      <div class="p-2.5 rounded bg-black/40 border border-white/5 space-y-1.5">
+        <div class="flex justify-between items-center text-[11px]">
+          <span class="text-slate-300">Cruising Velocity (% of c):</span>
+          <span id="label-speed-c" class="font-bold text-hudCyan text-xs">20.00 % c</span>
+        </div>
+        <input id="slider-speed" type="range" min="0.01" max="50.0" step="0.05" value="20.0" class="w-full">
+        <div class="flex justify-between text-[9px] text-slate-400 font-mono">
+          <span>~30 km/s (0.01%)</span>
+          <span id="label-speed-kms" class="text-slate-200">59,958 km/s</span>
+          <span>149,896 km/s (50%)</span>
+        </div>
+      </div>
+
+      <!-- Mass Sliders -->
+      <div class="p-2.5 rounded bg-black/40 border border-white/5 space-y-2">
+        <div class="flex justify-between text-[11px]">
+          <span class="text-slate-300">Spacecraft Dry Mass:</span>
+          <span id="label-dry-mass" class="font-bold text-white">5.0 kg</span>
+        </div>
+        <input id="slider-dry-mass" type="range" min="1" max="40000" step="1" value="5" class="w-full">
+
+        <div class="flex justify-between text-[11px]">
+          <span class="text-slate-300">Science Payload Mass:</span>
+          <span id="label-payload-mass" class="font-bold text-white">1.5 kg</span>
+        </div>
+        <input id="slider-payload-mass" type="range" min="0.5" max="10000" step="0.5" value="1.5" class="w-full">
+      </div>
+
+      <!-- Chemical Trap Warning -->
+      <div id="chemical-trap-box" class="p-2.5 rounded bg-red-950/80 border border-red-500/50 text-[10px] leading-relaxed hidden">
+        <div class="flex items-center gap-1.5 font-bold text-red-400 mb-1">
+          <span>⚠️</span>
+          <span>TSIOLKOVSKY ROCKET EQUATION TRAP</span>
+        </div>
+        <span>At Isp = 450s, reaching 0.20c requires <strong id="chemical-fuel-estimate">10¹¹⁰ kg</strong> of rocket fuel—more than all the baryonic atoms in the observable universe.</span>
+      </div>
+
+      <!-- Computed Flight Dynamics -->
+      <div class="p-3 rounded bg-black/60 border border-hudCyan/20 space-y-1.5 text-[10px]">
+        <div class="flex justify-between text-slate-300">
+          <span>Total Spacecraft Mass:</span>
+          <span id="calc-total-mass" class="text-white font-bold">6.5 kg</span>
+        </div>
+        <div class="flex justify-between text-slate-300">
+          <span>Lorentz Factor (γ):</span>
+          <span id="calc-lorentz-gamma" class="text-hudCyan font-bold">1.0206</span>
+        </div>
+        <div class="flex justify-between text-slate-300">
+          <span>Time Dilation Difference:</span>
+          <span id="calc-dilation-diff" class="text-hudGreen font-bold">-153.2 Days</span>
+        </div>
+        <div class="flex justify-between text-slate-300">
+          <span>Kinetic Energy at Cruise:</span>
+          <span id="calc-kinetic-energy" class="text-hudAmber font-bold">1.17 × 10¹⁶ J</span>
+        </div>
+        <div class="flex justify-between text-slate-300">
+          <span>Round-Trip Signal Delay (2d/c):</span>
+          <span id="calc-comms-delay" class="text-white font-bold">8.49 Years</span>
+        </div>
+      </div>
+
+      <div class="text-[9px] text-slate-400 border-t border-white/10 pt-2 flex items-start gap-1.5">
+        <span class="text-hudAmber font-bold">ℹ</span>
+        <span><strong>Academic Note:</strong> Kinematic estimates assume relativistic photon pressure or ideal exhaust conversions without interstellar dust erosion.</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Telemetry Footer and Timeline Controls -->
+  <footer class="absolute bottom-3 left-3 right-3 glass-hud rounded-lg p-3 z-20 hud-brackets">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center font-mono">
+      <div class="lg:col-span-6 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+        <div class="bg-black/40 p-2 rounded border border-white/5">
+          <div class="text-slate-400">DISTANCE</div>
+          <div id="footer-dist" class="text-xs font-bold text-white mt-0.5">4.2465 LY</div>
+          <div class="text-[9px] text-slate-400">4.017 × 10¹³ km</div>
+        </div>
+        <div class="bg-black/40 p-2 rounded border border-white/5">
+          <div class="text-slate-400">EARTH TIME (t)</div>
+          <div id="footer-earth-time" class="text-xs font-bold text-hudCyan mt-0.5">21.23 Yrs</div>
+          <div id="footer-arrival-year" class="text-[9px] text-slate-400">Arr: 2047.9 CE</div>
+        </div>
+        <div class="bg-black/40 p-2 rounded border border-white/5">
+          <div class="text-slate-400">PROBE PROPER TIME (τ)</div>
+          <div id="footer-ship-time" class="text-xs font-bold text-hudGreen mt-0.5">20.81 Yrs</div>
+          <div class="text-[9px] text-slate-400">Relativistic Clock</div>
+        </div>
+        <div class="bg-black/40 p-2 rounded border border-white/5">
+          <div class="text-slate-400">CURRENT PHASE</div>
+          <div id="footer-flight-phase" class="text-xs font-bold text-hudAmber mt-0.5">ACCELERATION</div>
+          <div id="footer-phase-pct" class="text-[9px] text-slate-400">Progress: 0.0%</div>
+        </div>
+      </div>
+
+      <div class="lg:col-span-6 bg-black/40 p-2 rounded border border-white/10 flex flex-col justify-between">
+        <div class="flex items-center justify-between text-[10px] mb-1">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-hudCyan animate-ping"></span>
+            <span>TRAJECTORY POSITION:</span>
+            <strong id="scrubber-pct-label" class="text-hudCyan">0.0%</strong>
+          </div>
+          <span id="scrubber-distance-label" class="text-slate-400">0.00 / 4.25 LY</span>
+        </div>
+
+        <div id="trajectory-scrubber-track" class="relative w-full h-3.5 bg-black/80 rounded-full border border-white/20 overflow-hidden cursor-pointer">
+          <div id="scrubber-fill" class="absolute top-0 bottom-0 left-0 bg-gradient-to-r from-cyan-500 via-sky-400 to-indigo-500 w-0 transition-all duration-75"></div>
+          <div id="flip-maneuver-marker" class="absolute top-0 bottom-0 w-1 bg-hudMagenta hidden" title="180° Deceleration Flip Maneuver"></div>
+        </div>
+
+        <div class="flex items-center justify-between mt-2 text-[10px]">
+          <div class="flex items-center space-x-2">
+            <button id="btn-playback-play" class="px-3 py-1 rounded bg-hudCyan/20 hover:bg-hudCyan/30 text-hudCyan border border-hudCyan/50 flex items-center gap-1.5 font-bold transition">
+              <span id="icon-playback-play">▶</span>
+              <span id="label-playback-play">START TRANSIT</span>
+            </button>
+            <button id="btn-playback-reset" class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-slate-300">
+              RESET
+            </button>
+          </div>
+
+          <div class="flex items-center space-x-1.5">
+            <span class="text-slate-400">WARP:</span>
+            <button data-warp="1" class="btn-warp-speed px-2 py-0.5 rounded bg-hudCyan/30 text-white font-bold">1x</button>
+            <button data-warp="10" class="btn-warp-speed px-2 py-0.5 rounded hover:bg-white/10 text-slate-400">10x</button>
+            <button data-warp="100" class="btn-warp-speed px-2 py-0.5 rounded hover:bg-white/10 text-slate-400">100x</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Presentation Tour Modal Overlay -->
+  <div id="presentation-overlay" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden flex-col justify-between p-4 md:p-8 pointer-events-auto">
+    <div class="flex items-center justify-between glass-hud p-3 rounded-lg border border-hudCyan/40 max-w-5xl mx-auto w-full">
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded bg-gradient-to-tr from-cyan-600 to-indigo-600 flex items-center justify-center text-white shadow-lg font-bold">
+          ★
+        </div>
+        <div>
+          <span class="text-[10px] font-mono text-hudCyan tracking-widest uppercase">STELLAR MISSION PLANNER • PRESENTATION MODE</span>
+          <h3 id="tour-step-badge" class="font-hud font-bold text-sm text-white">STEP 1 OF 5: SOL ORIGIN & CONCEPT</h3>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-2">
+        <button id="tour-auto-play-btn" class="px-2.5 py-1 rounded bg-hudCyan/20 border border-hudCyan/40 text-hudCyan text-xs font-mono flex items-center gap-1 transition">
+          <span id="tour-auto-icon">▶</span>
+          <span id="tour-auto-label">AUTO-ADVANCE</span>
+        </button>
+        <button id="tour-exit-btn" class="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-white transition font-bold" title="Exit Tour">
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <div class="max-w-2xl mx-auto w-full glass-hud p-6 rounded-xl border border-hudCyan/40 shadow-2xl relative">
+      <div class="flex items-center justify-between mb-3">
+        <span id="tour-category-tag" class="px-2 py-0.5 rounded bg-hudCyan/20 text-hudCyan text-[10px] font-mono border border-hudCyan/40 font-bold uppercase">
+          MISSION ARCHITECTURE
+        </span>
+        <div class="flex space-x-1" id="tour-stepper-dots"></div>
+      </div>
+
+      <h2 id="tour-title" class="font-hud font-bold text-xl md:text-2xl text-white mb-2 tracking-wide">
+        Sol Origin & Autonomous Mission Concept
+      </h2>
+      <p id="tour-narrative" class="text-sm md:text-base text-slate-300 leading-relaxed font-sans mb-4">
+        Humanity stands on the brink of interstellar exploration. Using verified astronomical catalogs from NASA's Exoplanet Archive, this platform models relativistic travel times, realistic propulsion physics, and trajectory insertion for destinations beyond our solar system.
+      </p>
+
+      <div id="tour-highlight-box" class="p-3 rounded bg-black/60 border border-white/10 text-xs font-mono text-slate-300">
+        <strong class="text-hudCyan">Key Feature:</strong> Interactive 3D celestial coordinates with Earth-centered departure trajectory and procedural planetary bodies.
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between max-w-2xl mx-auto w-full pt-4">
+      <button id="tour-prev-btn" class="px-4 py-2 rounded-lg bg-black/60 hover:bg-white/10 border border-white/20 text-slate-300 font-mono text-xs flex items-center gap-1.5 transition">
+        ← PREVIOUS
+      </button>
+      <div class="text-xs font-mono text-slate-400">
+        Use Arrow Keys ← → to navigate
+      </div>
+      <button id="tour-next-btn" class="px-5 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 border border-hudCyan text-white font-hud font-bold text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(0,240,255,0.4)] transition">
+        <span>NEXT</span> →
+      </button>
+    </div>
+  </div>
+
+  <!-- Mathematical Formulations Modal -->
+  <div id="math-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+    <div class="glass-hud rounded-lg max-w-3xl w-full p-5 md:p-6 hud-brackets relative max-h-[85vh] overflow-y-auto font-mono text-xs">
+      <div class="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+        <div class="flex items-center gap-2">
+          <div class="w-6 h-6 rounded bg-hudCyan/20 text-hudCyan flex items-center justify-center border border-hudCyan font-bold">
+            Σ
+          </div>
+          <h3 class="font-hud font-bold text-base text-white">INTERSTELLAR RELATIVISTIC FLIGHT MECHANICS</h3>
+        </div>
+        <button id="btn-close-math" class="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-white transition font-bold">
+          ✕
+        </button>
+      </div>
+
+      <div class="space-y-4 text-slate-300">
+        <div class="p-3 bg-black/50 rounded border border-white/5 space-y-1">
+          <h4 class="text-hudCyan font-bold text-sm">1. Lorentz Factor (γ) & Time Dilation</h4>
+          <p class="text-slate-400 text-[11px]">Special relativity dictates that clocks moving relative to Earth tick slower by the factor γ:</p>
+          <div class="p-2 bg-black/80 rounded border border-hudCyan/20 text-white font-bold my-1 text-center">
+            γ = 1 / √(1 - (v/c)²) &emsp; | &emsp; τ = t_Earth / γ
+          </div>
+          <div id="math-calc-lorentz" class="text-hudGreen text-[11px]">
+            At 0.20c: γ = 1.02062. Ship time is dilated by 2.02%.
+          </div>
+        </div>
+
+        <div class="p-3 bg-black/50 rounded border border-white/5 space-y-1">
+          <h4 class="text-hudAmber font-bold text-sm">2. Relativistic Kinetic Energy Demand</h4>
+          <p class="text-slate-400 text-[11px]">Kinetic energy accounts for mass gain at relativistic velocities:</p>
+          <div class="p-2 bg-black/80 rounded border border-hudAmber/20 text-white font-bold my-1 text-center">
+            E_k = (γ - 1) · m_total · c²
+          </div>
+          <div id="math-calc-energy" class="text-hudAmber text-[11px]">
+            Total energy required to accelerate the craft is calculated dynamically based on payload mass and speed.
+          </div>
+        </div>
+
+        <div class="p-3 bg-black/50 rounded border border-white/5 space-y-1">
+          <h4 class="text-hudMagenta font-bold text-sm">3. Relativistic Rocket Equation (Tsiolkovsky)</h4>
+          <p class="text-slate-400 text-[11px]">For onboard propelled spacecraft (Fusion & Antimatter):</p>
+          <div class="p-2 bg-black/80 rounded border border-hudMagenta/20 text-white font-bold my-1 text-center">
+            v/c = tanh( (v_e / c) · ln(m_initial / m_final) )
+          </div>
+          <p class="text-slate-400 text-[10px]">
+            Explains why chemical propellants fail exponentially for interstellar distances, while beamed lightsails sidestep the rocket equation entirely by leaving the power source at Earth.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 flex justify-end">
+        <button id="btn-close-math-footer" class="px-4 py-1.5 rounded bg-hudCyan/20 hover:bg-hudCyan/30 border border-hudCyan text-white font-hud text-xs transition">
+          CLOSE PROOF
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* =======================================================================
+       1. REAL NASA EXOPLANET ARCHIVE DATASET (6 PRIME TARGETS)
+       ======================================================================= */
+    const NASA_EXOPLANETS = [
+      {
+        id: 'proxima_b',
+        name: 'Proxima Centauri b',
+        distanceLY: 4.2465,
+        hostStar: 'Proxima Centauri (M5.5V Dwarf)',
+        massEarths: 1.07,
+        radiusEarths: 1.03,
+        discoveryMethod: 'Radial Velocity',
+        discoveryYear: 2016,
+        teqKelvin: 234,
+        habitableZone: true,
+        surfaceType: 'Rocky / Tidally Locked',
+        colorHex: 0xd97736,
+        scenePos: new THREE.Vector3(14.0, 3.0, -18.0)
+      },
+      {
+        id: 'trappist_1e',
+        name: 'TRAPPIST-1 e',
+        distanceLY: 40.66,
+        hostStar: 'TRAPPIST-1 (M8V Ultra-cool Dwarf)',
+        massEarths: 0.69,
+        radiusEarths: 0.92,
+        discoveryMethod: 'Transit',
+        discoveryYear: 2017,
+        teqKelvin: 251,
+        habitableZone: true,
+        surfaceType: 'Water-World Candidate',
+        colorHex: 0x0077b6,
+        scenePos: new THREE.Vector3(34.0, 15.0, -32.0)
+      },
+      {
+        id: 'ross_128b',
+        name: 'Ross 128 b',
+        distanceLY: 11.03,
+        hostStar: 'Ross 128 (M4V Quiet Dwarf)',
+        massEarths: 1.40,
+        radiusEarths: 1.11,
+        discoveryMethod: 'Radial Velocity',
+        discoveryYear: 2017,
+        teqKelvin: 280,
+        habitableZone: true,
+        surfaceType: 'Temperate Terrestrial',
+        colorHex: 0x8338ec,
+        scenePos: new THREE.Vector3(22.0, -14.0, 20.0)
+      },
+      {
+        id: 'lhs_1140b',
+        name: 'LHS 1140 b',
+        distanceLY: 48.80,
+        hostStar: 'LHS 1140 (M4.5V Dwarf)',
+        massEarths: 5.60,
+        radiusEarths: 1.73,
+        discoveryMethod: 'Transit',
+        discoveryYear: 2017,
+        teqKelvin: 226,
+        habitableZone: true,
+        surfaceType: 'Dense Ice / Ocean Super-Earth',
+        colorHex: 0x2a9d8f,
+        scenePos: new THREE.Vector3(-42.0, 16.0, 36.0)
+      },
+      {
+        id: 'kepler_186f',
+        name: 'Kepler-186 f',
+        distanceLY: 582.0,
+        hostStar: 'Kepler-186 (M1V Dwarf)',
+        massEarths: 1.71,
+        radiusEarths: 1.17,
+        discoveryMethod: 'Transit',
+        discoveryYear: 2014,
+        teqKelvin: 188,
+        habitableZone: true,
+        surfaceType: 'Sub-Zero Earth-Twin Candidate',
+        colorHex: 0xf4a261,
+        scenePos: new THREE.Vector3(60.0, -35.0, 52.0)
+      },
+      {
+        id: 'kepler_452b',
+        name: 'Kepler-452 b',
+        distanceLY: 1799.0,
+        hostStar: 'Kepler-452 (G2V Solar Twin)',
+        massEarths: 5.00,
+        radiusEarths: 1.51,
+        discoveryMethod: 'Transit',
+        discoveryYear: 2015,
+        teqKelvin: 265,
+        habitableZone: true,
+        surfaceType: 'Super-Earth "Older Cousin"',
+        colorHex: 0xe76f51,
+        scenePos: new THREE.Vector3(-70.0, 50.0, -64.0)
+       }
+       const CELESTIAL_CATALOG = [
+  // ==========================================
+  // CENTRAL STAR
+  // ==========================================
+  {
+    id: 'sun',
+    name: 'The Sun (Sol)',
+    distanceLY: 0.0000158,
+    hostStar: 'Galactic Center (Sagittarius A*)',
+    massEarths: 332946.0,
+    radiusEarths: 109.2,
+    discoveryMethod: 'Naked Eye / Ancient',
+    discoveryYear: -3000,
+    teqKelvin: 5778,
+    habitableZone: false,
+    surfaceType: 'G2V Main-Sequence Yellow Dwarf',
+    colorHex: 0xffe87c,
+    scenePos: new THREE.Vector3(0.0, 0.0, 0.0)
+  },
+
+  // ==========================================
+  // TERRESTRIAL (ROCKY) PLANETS
+  // ==========================================
+  {
+    id: 'mercury',
+    name: 'Mercury',
+    distanceLY: 0.0000061,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.055,
+    radiusEarths: 0.383,
+    discoveryMethod: 'Naked Eye / Ancient',
+    discoveryYear: -1400,
+    teqKelvin: 440,
+    habitableZone: false,
+    surfaceType: 'Airless Heavily Cratered Basalt',
+    colorHex: 0x8c8c8c,
+    scenePos: new THREE.Vector3(3.9, 0.48, 0.0)
+  },
+  {
+    id: 'venus',
+    name: 'Venus',
+    distanceLY: 0.0000114,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.815,
+    radiusEarths: 0.949,
+    discoveryMethod: 'Naked Eye / Ancient',
+    discoveryYear: -1600,
+    teqKelvin: 737,
+    habitableZone: false,
+    surfaceType: 'Dense Supercritical CO2 / Volcanic Plains',
+    colorHex: 0xe3bb7b,
+    scenePos: new THREE.Vector3(7.2, 0.43, -0.2)
+  },
+  {
+    id: 'earth',
+    name: 'Earth',
+    distanceLY: 0.0000158,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 1.0,
+    radiusEarths: 1.0,
+    discoveryMethod: 'Naked Eye / Native',
+    discoveryYear: 0,
+    teqKelvin: 255,
+    habitableZone: true,
+    surfaceType: 'Temperate Silicate / Liquid Water Ocean',
+    colorHex: 0x4b70dd,
+    scenePos: new THREE.Vector3(10.0, 0.0, 0.0)
+  },
+  {
+    id: 'mars',
+    name: 'Mars',
+    distanceLY: 0.0000241,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.107,
+    radiusEarths: 0.532,
+    discoveryMethod: 'Naked Eye / Ancient',
+    discoveryYear: -1500,
+    teqKelvin: 210,
+    habitableZone: false,
+    surfaceType: 'Arid Iron Oxide Regolith',
+    colorHex: 0xc1440e,
+    scenePos: new THREE.Vector3(15.2, 0.49, 0.3)
+  },
+
+  // ==========================================
+  // ASTEROID BELT DWARF PLANET
+  // ==========================================
+  {
+    id: 'ceres',
+    name: 'Ceres',
+    distanceLY: 0.0000438,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.000157,
+    radiusEarths: 0.074,
+    discoveryMethod: 'Telescopic Survey',
+    discoveryYear: 1801,
+    teqKelvin: 168,
+    habitableZone: false,
+    surfaceType: 'Carbonaceous Clay & Water-Ice Regolith',
+    colorHex: 0x9e9993,
+    scenePos: new THREE.Vector3(27.7, 5.08, -1.2)
+  },
+
+  // ==========================================
+  // GAS GIANTS
+  // ==========================================
+  {
+    id: 'jupiter',
+    name: 'Jupiter',
+    distanceLY: 0.0000823,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 317.8,
+    radiusEarths: 11.21,
+    discoveryMethod: 'Naked Eye / Ancient',
+    discoveryYear: -700,
+    teqKelvin: 110,
+    habitableZone: false,
+    surfaceType: 'Gas Giant (H2/He Convective Envelope)',
+    colorHex: 0xd8ca9d,
+    scenePos: new THREE.Vector3(52.0, 1.18, 0.8)
+  },
+  {
+    id: 'saturn',
+    name: 'Saturn',
+    distanceLY: 0.0001509,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 95.2,
+    radiusEarths: 9.45,
+    discoveryMethod: 'Naked Eye / Ancient',
+    discoveryYear: -700,
+    teqKelvin: 81,
+    habitableZone: false,
+    surfaceType: 'Gas Giant (H2/He Envelope & Ring System)',
+    colorHex: 0xe2bf7d,
+    scenePos: new THREE.Vector3(95.4, 4.13, -1.5)
+  },
+
+  // ==========================================
+  // ICE GIANTS
+  // ==========================================
+  {
+    id: 'uranus',
+    name: 'Uranus',
+    distanceLY: 0.0003036,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 14.5,
+    radiusEarths: 4.01,
+    discoveryMethod: 'Telescopic Survey',
+    discoveryYear: 1781,
+    teqKelvin: 58,
+    habitableZone: false,
+    surfaceType: 'Ice Giant (Methane/Ammonia Mantle)',
+    colorHex: 0xbbe1e4,
+    scenePos: new THREE.Vector3(191.9, 2.58, 1.1)
+  },
+  {
+    id: 'neptune',
+    name: 'Neptune',
+    distanceLY: 0.0004758,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 17.1,
+    radiusEarths: 3.88,
+    discoveryMethod: 'Mathematical Prediction / Telescopic',
+    discoveryYear: 1846,
+    teqKelvin: 46,
+    habitableZone: false,
+    surfaceType: 'Ice Giant (Superheated Volatile Mantle)',
+    colorHex: 0x6081ff,
+    scenePos: new THREE.Vector3(300.7, 9.28, -2.4)
+  },
+
+  // ==========================================
+  // TRANS-NEPTUNIAN DWARF PLANETS
+  // ==========================================
+  {
+    id: 'pluto',
+    name: 'Pluto',
+    distanceLY: 0.0006247,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.00218,
+    radiusEarths: 0.186,
+    discoveryMethod: 'Photographic Plate Astrometry',
+    discoveryYear: 1930,
+    teqKelvin: 44,
+    habitableZone: false,
+    surfaceType: 'Nitrogen, Methane & Carbon Monoxide Ice',
+    colorHex: 0xd1b59b,
+    scenePos: new THREE.Vector3(394.8, 116.5, 5.0)
+  },
+  {
+    id: 'haumea',
+    name: 'Haumea',
+    distanceLY: 0.0006839,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.00067,
+    radiusEarths: 0.125,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2004,
+    teqKelvin: 32,
+    habitableZone: false,
+    surfaceType: 'Crystalline Water Ice (Elongated Triaxial Ellipsoid)',
+    colorHex: 0xa7a59b,
+    scenePos: new THREE.Vector3(432.2, 204.2, -18.0)
+  },
+  {
+    id: 'makemake',
+    name: 'Makemake',
+    distanceLY: 0.0007246,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.00052,
+    radiusEarths: 0.112,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2005,
+    teqKelvin: 30,
+    habitableZone: false,
+    surfaceType: 'Volatile Methane & Ethane Frost',
+    colorHex: 0xc78b63,
+    scenePos: new THREE.Vector3(457.9, 221.7, 12.0)
+  },
+  {
+    id: 'quaoar',
+    name: 'Quaoar',
+    distanceLY: 0.0006914,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.0002,
+    radiusEarths: 0.087,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2002,
+    teqKelvin: 43,
+    habitableZone: false,
+    surfaceType: 'Amorphous Water Ice & Tholins',
+    colorHex: 0x8c6a58,
+    scenePos: new THREE.Vector3(436.9, 60.8, -4.5)
+  },
+  {
+    id: 'eris',
+    name: 'Eris',
+    distanceLY: 0.0010726,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.00278,
+    radiusEarths: 0.182,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2005,
+    teqKelvin: 30,
+    habitableZone: false,
+    surfaceType: 'Highly Reflective Frozen Methane Ice',
+    colorHex: 0xefefef,
+    scenePos: new THREE.Vector3(677.8, 470.9, -35.0)
+  },
+
+  // ==========================================
+  // DWARF PLANET CANDIDATES
+  // ==========================================
+  {
+    id: 'orcus',
+    name: 'Orcus',
+    distanceLY: 0.0006238,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.000106,
+    radiusEarths: 0.072,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2004,
+    teqKelvin: 44,
+    habitableZone: false,
+    surfaceType: 'Water Ice & Carbonate Regolith',
+    colorHex: 0x707372,
+    scenePos: new THREE.Vector3(394.2, 138.6, 9.0)
+  },
+  {
+    id: 'salacia',
+    name: 'Salacia',
+    distanceLY: 0.0006675,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.000082,
+    radiusEarths: 0.066,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2004,
+    teqKelvin: 43,
+    habitableZone: false,
+    surfaceType: 'Low-Albedo Volatile Ice & Rock',
+    colorHex: 0x504e4d,
+    scenePos: new THREE.Vector3(421.8, 171.2, -14.0)
+  },
+  {
+    id: 'ms4_2002',
+    name: '2002 MS4',
+    distanceLY: 0.0006635,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.000067,
+    radiusEarths: 0.063,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2002,
+    teqKelvin: 43,
+    habitableZone: false,
+    surfaceType: 'Dark Silicate / Hydrocarbon Sludge',
+    colorHex: 0x6b6560,
+    scenePos: new THREE.Vector3(419.3, 127.3, 6.0)
+  },
+  {
+    id: 'gonggong',
+    name: 'Gonggong',
+    distanceLY: 0.0010678,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.000293,
+    radiusEarths: 0.096,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2007,
+    teqKelvin: 30,
+    habitableZone: false,
+    surfaceType: 'Red Tholins & Water-Ice Slush',
+    colorHex: 0xa84c38,
+    scenePos: new THREE.Vector3(674.8, 344.9, 24.0)
+  },
+  {
+    id: 'sedna',
+    name: 'Sedna',
+    distanceLY: 0.0083212,
+    hostStar: 'The Sun (G2V Yellow Dwarf)',
+    massEarths: 0.000335,
+    radiusEarths: 0.078,
+    discoveryMethod: 'CCD Sky Survey',
+    discoveryYear: 2003,
+    teqKelvin: 12,
+    habitableZone: false,
+    surfaceType: 'Detached Inner Oort Cloud Organic Tholins',
+    colorHex: 0xb0422b,
+    scenePos: new THREE.Vector3(5258.6, 1087.0, -85.0)
+  }
+];
+
+    const PROPULSION_CONFIGS = {
+      lightsail: {
+        name: 'Beamed Laser Lightsail',
+        isp: 'Photonic (Inf)',
+        defaultVelocityPct: 20.0,
+        dryMassKg: 5.0,
+        payloadMassKg: 1.5,
+        desc: 'Stationary 100GW laser pushes ultra-reflective sail. Leaves propellant at Earth.'
+      },
+      antimatter: {
+        name: 'Antimatter-Catalyzed Fusion',
+        isp: '3,000,000 s',
+        defaultVelocityPct: 40.0,
+        dryMassKg: 12000,
+        payloadMassKg: 1500,
+        desc: 'Antiproton thermal catalyst yields extreme relativistic exhaust velocity.'
+      },
+      daedalus: {
+        name: 'Project Daedalus Pulsed Fusion',
+        isp: '1,000,000 s',
+        defaultVelocityPct: 12.0,
+        dryMassKg: 42000,
+        payloadMassKg: 450,
+        desc: 'Two-stage pulsed inertial fusion using Deuterium and Helium-3 micro-pellets.'
+      },
+      dfd: {
+        name: 'Direct Fusion Drive (DFD)',
+        isp: '150,000 s',
+        defaultVelocityPct: 5.0,
+        dryMassKg: 3500,
+        payloadMassKg: 800,
+        desc: 'Field-reversed configuration magnetic plasma fusion reactor.'
+      },
+      ion_adv: {
+        name: 'High-Power Relativistic Ion Clustered Array',
+        isp: '45,000 s',
+        defaultVelocityPct: 0.5,
+        dryMassKg: 8500,
+        payloadMassKg: 2000,
+        desc: 'Continuous nuclear-electric Hall effect / VASIMR thruster cluster.'
+      },
+      chemical_trap: {
+        name: 'Chemical Bipropellant (Trap)',
+        isp: '450 s',
+        defaultVelocityPct: 0.01,
+        dryMassKg: 15000,
+        payloadMassKg: 1000,
+        desc: 'Liquid Oxygen / Hydrogen. Demonstrates exponential Tsiolkovsky barrier.'
+      }
+    };
+
+    let currentTarget = NASA_EXOPLANETS[0];
+    let missionState = {
+      flightProfile: 'flyby',
+      propulsion: 'lightsail',
+      velocityPctC: 20.0,
+      dryMassKg: 5.0,
+      payloadMassKg: 1.5,
+      progress: 0.0,
+      isPlaying: false,
+      warpSpeed: 1.0
+    };
+
+    class AudioFeedback {
+      constructor() {
+        this.ctx = null;
+        this.muted = false;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+            this.ctx = new AudioContextClass();
+          }
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+      playChirp(freq = 880, duration = 0.06, type = 'sine') {
+        if (this.muted) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(freq * 1.5, this.ctx.currentTime + duration);
+          gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {}
+      }
+      playWhoosh() {
+        if (this.muted) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(140, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(420, this.ctx.currentTime + 0.35);
+          gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.35);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.35);
+        } catch (e) {}
+      }
+      toggle() {
+        this.muted = !this.muted;
+        return this.muted;
+      }
+    }
+    const sound = new AudioFeedback();
+
+    let scene, camera, renderer, controls;
+    let earthMesh, atmosphereMesh, moonMesh;
+    let planetObjects = new Map();
+    let trajectorySpline = null;
+    let trajectoryLineMesh = null;
+    let probeGroup = null;
+    let thrusterPlumeMesh = null;
+    let thrusterRetroMesh = null;
+    let raycaster, mousePointer;
+
+    function init3DViewport() {
+      const container = document.getElementById('canvas-container');
+      const w = container.clientWidth || window.innerWidth;
+      const h = container.clientHeight || window.innerHeight;
+
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x030712, 0.002);
+
+      camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 4000);
+      camera.position.set(22, 14, 28);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.2;
+      container.appendChild(renderer.domElement);
+
+      if (typeof THREE.OrbitControls !== 'undefined') {
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 3.0;
+        controls.maxDistance = 600;
+      }
+
+      const ambLight = new THREE.AmbientLight(0x334155, 1.2);
+      scene.add(ambLight);
+
+      const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+      sunLight.position.set(-60, 40, -50);
+      scene.add(sunLight);
+
+      raycaster = new THREE.Raycaster();
+      mousePointer = new THREE.Vector2();
+
+      buildStarfield();
+      buildEarthSystem();
+      buildNasaExoplanetsInScene();
+      buildSpaceProbe();
+      reconstructTrajectoryCurve();
+
+      window.addEventListener('resize', onWindowResize);
+      container.addEventListener('pointerdown', onScenePointerDown);
+    }
+
+    function createProceduralTexture(type, baseHex) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+
+      const col = new THREE.Color(baseHex);
+      ctx.fillStyle = col.getStyle();
+      ctx.fillRect(0, 0, 512, 256);
+
+      for (let y = 0; y < 256; y += 4) {
+        const factor = Math.sin(y * 0.08) * Math.cos(y * 0.03);
+        ctx.fillStyle = 'rgba(255, 255, 255, ' + (Math.abs(factor) * 0.25) + ')';
+        ctx.fillRect(0, y, 512, 3);
+      }
+
+      if (type === 'earth') {
+        ctx.fillStyle = '#1b4332';
+        for (let i = 0; i < 35; i++) {
+          const x = (Math.sin(i * 45) * 0.5 + 0.5) * 512;
+          const y = (Math.cos(i * 32) * 0.5 + 0.5) * 256;
+          ctx.beginPath();
+          ctx.arc(x, y, 20 + Math.abs(Math.sin(i)) * 40, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function buildStarfield() {
+      const count = 3500;
+      const geom = new THREE.BufferGeometry();
+      const pos = new Float32Array(count * 3);
+      const cols = new Float32Array(count * 3);
+
+      const palette = [
+        new THREE.Color(0xa0c4ff),
+        new THREE.Color(0xffffff),
+        new THREE.Color(0xffd166),
+        new THREE.Color(0x00f0ff),
+        new THREE.Color(0xf59e0b)
+      ];
+
+      for (let i = 0; i < count; i++) {
+        const i3 = i * 3;
+        const rad = 250 + Math.random() * 1200;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos((Math.random() * 2) - 1);
+
+        pos[i3] = rad * Math.sin(phi) * Math.cos(theta);
+        pos[i3 + 1] = rad * Math.sin(phi) * Math.sin(theta);
+        pos[i3 + 2] = rad * Math.cos(phi);
+
+        const c = palette[Math.floor(Math.random() * palette.length)];
+        cols[i3] = c.r;
+        cols[i3 + 1] = c.g;
+        cols[i3 + 2] = c.b;
+      }
+
+      geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geom.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+
+      const mat = new THREE.PointsMaterial({
+        size: 1.8,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.85
+      });
+
+      scene.add(new THREE.Points(geom, mat));
+    }
+
+    function buildEarthSystem() {
+      const earthGroup = new THREE.Group();
+      earthGroup.position.set(0, 0, 0);
+
+      const earthGeo = new THREE.SphereGeometry(2.0, 48, 48);
+      const earthMat = new THREE.MeshStandardMaterial({
+        map: createProceduralTexture('earth', 0x0f386b),
+        roughness: 0.55,
+        metalness: 0.1
+      });
+      earthMesh = new THREE.Mesh(earthGeo, earthMat);
+      earthGroup.add(earthMesh);
+
+      const atmoGeo = new THREE.SphereGeometry(2.18, 32, 32);
+      const atmoMat = new THREE.MeshBasicMaterial({
+        color: 0x00f0ff,
+        transparent: true,
+        opacity: 0.25,
+        side: THREE.BackSide,
+        blending: THREE.AdditiveBlending
+      });
+      atmosphereMesh = new THREE.Mesh(atmoGeo, atmoMat);
+      earthGroup.add(atmosphereMesh);
+
+      const moonGeo = new THREE.SphereGeometry(0.5, 24, 24);
+      const moonMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.9 });
+      moonMesh = new THREE.Mesh(moonGeo, moonMat);
+      moonMesh.position.set(5.5, 1.2, 2.5);
+      earthGroup.add(moonMesh);
+
+      const ringGeo = new THREE.RingGeometry(3.6, 3.75, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x00f0ff,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.4
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.rotation.x = Math.PI / 2;
+      earthGroup.add(ringMesh);
+
+      scene.add(earthGroup);
+    }
+
+    function buildNasaExoplanetsInScene() {
+      NASA_EXOPLANETS.forEach(planet => {
+        const group = new THREE.Group();
+        group.position.copy(planet.scenePos);
+        group.userData = planet;
+
+        const rad = 1.0 * (planet.radiusEarths || 1.0);
+        const geo = new THREE.SphereGeometry(rad, 36, 36);
+        const mat = new THREE.MeshStandardMaterial({
+          map: createProceduralTexture('exoplanet', planet.colorHex),
+          roughness: 0.65,
+          metalness: 0.1
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.userData = { planetId: planet.id };
+        group.add(mesh);
+
+        const haloGeo = new THREE.SphereGeometry(rad * 1.15, 24, 24);
+        const haloMat = new THREE.MeshBasicMaterial({
+          color: planet.colorHex,
+          transparent: true,
+          opacity: 0.3,
+          side: THREE.BackSide,
+          blending: THREE.AdditiveBlending
+        });
+        group.add(new THREE.Mesh(haloGeo, haloMat));
+
+        const reticleGeo = new THREE.RingGeometry(rad * 1.4, rad * 1.55, 36);
+        const reticleMat = new THREE.MeshBasicMaterial({
+          color: planet.colorHex,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.65
+        });
+        const reticle = new THREE.Mesh(reticleGeo, reticleMat);
+        reticle.rotation.x = Math.PI / 2;
+        group.add(reticle);
+
+        scene.add(group);
+        planetObjects.set(planet.id, group);
+      });
+    }
+
+    function buildSpaceProbe() {
+      probeGroup = new THREE.Group();
+
+      const busGeo = new THREE.CylinderGeometry(0.24, 0.34, 0.9, 8);
+      const busMat = new THREE.MeshStandardMaterial({
+        color: 0xe2e8f0,
+        metalness: 0.85,
+        roughness: 0.2
+      });
+      const bus = new THREE.Mesh(busGeo, busMat);
+      bus.rotation.x = Math.PI / 2;
+      probeGroup.add(bus);
+
+      const dishGeo = new THREE.ConeGeometry(0.65, 0.25, 20, 1, true);
+      const dishMat = new THREE.MeshStandardMaterial({
+        color: 0x00f0ff,
+        metalness: 0.8,
+        roughness: 0.2,
+        side: THREE.DoubleSide
+      });
+      const dish = new THREE.Mesh(dishGeo, dishMat);
+      dish.position.set(0, 0, -0.55);
+      dish.rotation.x = -Math.PI / 2;
+      probeGroup.add(dish);
+
+      const vaneGeo = new THREE.PlaneGeometry(1.6, 1.6);
+      const vaneMat = new THREE.MeshBasicMaterial({
+        color: 0x00f0ff,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.65,
+        wireframe: true
+      });
+      const vane = new THREE.Mesh(vaneGeo, vaneMat);
+      vane.position.set(0, 0, 0.1);
+      probeGroup.add(vane);
+
+      const plumeGeo = new THREE.ConeGeometry(0.2, 0.85, 16);
+      const plumeMat = new THREE.MeshBasicMaterial({
+        color: 0x00f0ff,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending
+      });
+      thrusterPlumeMesh = new THREE.Mesh(plumeGeo, plumeMat);
+      thrusterPlumeMesh.position.set(0, 0, 0.8);
+      thrusterPlumeMesh.rotation.x = Math.PI / 2;
+      probeGroup.add(thrusterPlumeMesh);
+
+      const retroMat = new THREE.MeshBasicMaterial({
+        color: 0xec4899,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending
+      });
+      thrusterRetroMesh = new THREE.Mesh(plumeGeo, retroMat);
+      thrusterRetroMesh.position.set(0, 0, -0.8);
+      thrusterRetroMesh.rotation.x = -Math.PI / 2;
+      thrusterRetroMesh.visible = false;
+      probeGroup.add(thrusterRetroMesh);
+
+      probeGroup.scale.set(0.65, 0.65, 0.65);
+      scene.add(probeGroup);
+    }
+
+    function reconstructTrajectoryCurve() {
+      if (trajectoryLineMesh) scene.remove(trajectoryLineMesh);
+
+      const pStart = new THREE.Vector3(0, 0, 0);
+      const pEnd = currentTarget.scenePos.clone();
+
+      const pMid = new THREE.Vector3().addVectors(pStart, pEnd).multiplyScalar(0.5);
+      pMid.y += 8.0;
+
+      trajectorySpline = new THREE.CatmullRomCurve3([pStart, pMid, pEnd]);
+      const points = trajectorySpline.getPoints(120);
+
+      const geom = new THREE.BufferGeometry().setFromPoints(points);
+      const mat = new THREE.LineDashedMaterial({
+        color: 0x00f0ff,
+        dashSize: 1.2,
+        gapSize: 0.6,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending
+      });
+
+      trajectoryLineMesh = new THREE.Line(geom, mat);
+      trajectoryLineMesh.computeLineDistances();
+      scene.add(trajectoryLineMesh);
+
+      updateProbePositionOnSpline();
+    }
+
+    function updateProbePositionOnSpline() {
+      if (!trajectorySpline || !probeGroup) return;
+
+      const t = Math.min(Math.max(missionState.progress, 0.0001), 0.9999);
+      const pos = trajectorySpline.getPointAt(t);
+      const tangent = trajectorySpline.getTangentAt(t).normalize();
+
+      probeGroup.position.copy(pos);
+
+      const isOrbitMode = missionState.flightProfile === 'orbit';
+      const isBrakingPhase = isOrbitMode && t >= 0.5;
+
+      if (isBrakingPhase) {
+        const flippedTangent = tangent.clone().negate();
+        probeGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), flippedTangent);
+        thrusterPlumeMesh.visible = false;
+        thrusterRetroMesh.visible = true;
+      } else {
+        probeGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
+        thrusterPlumeMesh.visible = true;
+        thrusterRetroMesh.visible = false;
+      }
+    }
+
+    function onWindowResize() {
+      const container = document.getElementById('canvas-container');
+      if (!container || !camera || !renderer) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    function onScenePointerDown(event) {
+      if (!camera || !scene || !raycaster) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      mousePointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mousePointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mousePointer, camera);
+      const meshesToTest = [];
+      planetObjects.forEach(group => {
+        if (group.children[0]) meshesToTest.push(group.children[0]);
+      });
+
+      const intersects = raycaster.intersectObjects(meshesToTest);
+      if (intersects.length > 0) {
+        const hit = intersects[0].object;
+        if (hit.userData && hit.userData.planetId) {
+          selectPlanetTarget(hit.userData.planetId);
+        }
+      }
+    }
+
+    const SPEED_OF_LIGHT_KMS = 299792.458;
+    const JOULES_PER_MEGATON_TNT = 4.184e15;
+
+    function computeMissionMetrics() {
+      const distLY = currentTarget.distanceLY;
+      const beta = Math.max(missionState.velocityPctC / 100.0, 0.0001);
+      const v_kms = beta * SPEED_OF_LIGHT_KMS;
+
+      const totalMassKg = missionState.dryMassKg + missionState.payloadMassKg;
+
+      let earthTravelYears = distLY / beta;
+      if (missionState.flightProfile === 'orbit') {
+        earthTravelYears *= 1.15;
+      }
+
+      const gamma = 1.0 / Math.sqrt(Math.max(1.0 - (beta * beta), 0.0000001));
+      const shipTravelYears = earthTravelYears / gamma;
+      const dilationDiffDays = (earthTravelYears - shipTravelYears) * 365.25;
+
+      const c_mps = SPEED_OF_LIGHT_KMS * 1000;
+      const kineticJoules = (gamma - 1.0) * totalMassKg * Math.pow(c_mps, 2);
+      const megatonsTNT = kineticJoules / JOULES_PER_MEGATON_TNT;
+
+      const launchYear = 2026.7;
+      const arrivalYear = Math.round(launchYear + earthTravelYears);
+      const roundTripSignalDelay = distLY * 2.0;
+
+      return {
+        distLY: distLY,
+        beta: beta,
+        v_kms: v_kms,
+        totalMassKg: totalMassKg,
+        earthTravelYears: earthTravelYears,
+        shipTravelYears: shipTravelYears,
+        gamma: gamma,
+        dilationDiffDays: dilationDiffDays,
+        kineticJoules: kineticJoules,
+        megatonsTNT: megatonsTNT,
+        arrivalYear: arrivalYear,
+        roundTripSignalDelay: roundTripSignalDelay
+      };
+    }
+
+    function updateHUDTelemetry() {
+      const m = computeMissionMetrics();
+
+      document.getElementById('nav-target-name').textContent = currentTarget.name;
+      document.getElementById('nav-propulsion-mode').textContent = PROPULSION_CONFIGS[missionState.propulsion].name;
+
+      document.getElementById('target-quick-name').textContent = currentTarget.name;
+      document.getElementById('target-quick-dist').textContent = currentTarget.distanceLY.toFixed(4) + ' LY';
+      document.getElementById('target-quick-temp').textContent = currentTarget.teqKelvin + ' K';
+      document.getElementById('target-quick-mass').textContent = currentTarget.massEarths + ' M⊕';
+
+      document.getElementById('label-speed-c').textContent = missionState.velocityPctC.toFixed(2) + ' % c';
+      document.getElementById('label-speed-kms').textContent = Math.round(m.v_kms).toLocaleString() + ' km/s';
+      document.getElementById('label-dry-mass').textContent = missionState.dryMassKg.toLocaleString() + ' kg';
+      document.getElementById('label-payload-mass').textContent = missionState.payloadMassKg.toLocaleString() + ' kg';
+
+      document.getElementById('calc-total-mass').textContent = m.totalMassKg.toLocaleString() + ' kg';
+      document.getElementById('calc-lorentz-gamma').textContent = m.gamma.toFixed(5);
+      document.getElementById('calc-dilation-diff').textContent = '-' + Math.round(m.dilationDiffDays).toLocaleString() + ' Days (' + ((1 - 1/m.gamma)*100).toFixed(2) + '%)';
+      document.getElementById('calc-kinetic-energy').textContent = formatJoules(m.kineticJoules, m.megatonsTNT);
+      document.getElementById('calc-comms-delay').textContent = m.roundTripSignalDelay.toFixed(2) + ' Earth Years';
+
+      const chemBox = document.getElementById('chemical-trap-box');
+      if (missionState.propulsion === 'chemical_trap') {
+        chemBox.classList.remove('hidden');
+      } else {
+        chemBox.classList.add('hidden');
+      }
+
+      document.getElementById('footer-dist').textContent = currentTarget.distanceLY.toFixed(4) + ' LY';
+      document.getElementById('footer-earth-time').textContent = formatYears(m.earthTravelYears);
+      document.getElementById('footer-arrival-year').textContent = m.arrivalYear > 999999 ? 'Far Future' : 'Arr: ' + m.arrivalYear.toLocaleString() + ' CE';
+      document.getElementById('footer-ship-time').textContent = formatYears(m.shipTravelYears);
+
+      const pct = (missionState.progress * 100).toFixed(1);
+      document.getElementById('scrubber-fill').style.width = pct + '%';
+      document.getElementById('scrubber-pct-label').textContent = pct + '%';
+      document.getElementById('footer-phase-pct').textContent = 'Progress: ' + pct + '%';
+
+      const currLY = (missionState.progress * currentTarget.distanceLY).toFixed(2);
+      document.getElementById('scrubber-distance-label').textContent = currLY + ' / ' + currentTarget.distanceLY.toFixed(2) + ' LY';
+
+      const phaseLabel = document.getElementById('footer-flight-phase');
+      const isOrbit = missionState.flightProfile === 'orbit';
+      if (missionState.progress < 0.2) {
+        phaseLabel.textContent = 'ACCELERATION';
+        phaseLabel.className = 'text-xs font-bold text-hudCyan mt-0.5';
+      } else if (missionState.progress < 0.5 || !isOrbit) {
+        phaseLabel.textContent = 'RELATIVISTIC CRUISE';
+        phaseLabel.className = 'text-xs font-bold text-sky-400 mt-0.5';
+      } else if (missionState.progress < 0.98) {
+        phaseLabel.textContent = '180° RETROGRADE BRAKE';
+        phaseLabel.className = 'text-xs font-bold text-hudMagenta mt-0.5';
+      } else {
+        phaseLabel.textContent = isOrbit ? 'ORBIT INSERTION REACHED' : 'FLYBY COMPLETE';
+        phaseLabel.className = 'text-xs font-bold text-hudGreen mt-0.5';
+      }
+
+      const flipMarker = document.getElementById('flip-maneuver-marker');
+      if (isOrbit) {
+        flipMarker.style.left = '50%';
+        flipMarker.classList.remove('hidden');
+      } else {
+        flipMarker.classList.add('hidden');
+      }
+
+      document.getElementById('math-calc-lorentz').textContent =
+        'At ' + (m.beta * 100).toFixed(2) + '% c: Lorentz γ = ' + m.gamma.toFixed(5) + '. Ship clock dilates by ' + ((1 - 1/m.gamma)*100).toFixed(2) + '% relative to Earth.';
+      document.getElementById('math-calc-energy').textContent =
+        'Total energy required to accelerate the ' + m.totalMassKg + ' kg craft is ' + formatJoules(m.kineticJoules, m.megatonsTNT) + '.';
+    }
+
+    function formatYears(yrs) {
+      if (yrs < 1.0) return Math.round(yrs * 365.25) + ' Days';
+      if (yrs < 100.0) return yrs.toFixed(2) + ' Yrs';
+      if (yrs < 10000.0) return Math.round(yrs).toLocaleString() + ' Yrs';
+      return (yrs / 1000).toFixed(1) + ' Millennia';
+    }
+
+    function formatJoules(j, mt) {
+      const exp = Math.floor(Math.log10(Math.max(j, 1)));
+      const mant = (j / Math.pow(10, exp)).toFixed(2);
+      const mtStr = mt >= 1000 ? (mt / 1000).toFixed(1) + ' GT' : mt.toFixed(1) + ' MT';
+      return mant + '×10' + toSup(exp) + ' J (' + mtStr + ')';
+    }
+
+    function toSup(n) {
+      const map = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻'};
+      return String(n).split('').map(c => map[c] || c).join('');
+    }
+
+    const PRESENTATION_STEPS = [
+      {
+        step: 1,
+        category: 'MISSION CONCEPT & ORIGIN',
+        title: 'Sol / Earth Starting Origin',
+        badge: 'STEP 1 OF 5: SOL ORIGIN & CONCEPT',
+        narrative: 'Humanity prepares for its maiden voyage across interstellar void. Starting from Sol (Earth-Moon barycenter), we calculate direct escape trajectories that overcome the deep gravitational well of the Sun.',
+        highlight: 'Earth with procedural cloud patterns, atmospheric glow shader, and orbital alignment ring.',
+        cameraPos: new THREE.Vector3(6, 4, 8),
+        cameraLookAt: new THREE.Vector3(0, 0, 0),
+        action: function() {
+          missionState.progress = 0.0;
+          updateProbePositionOnSpline();
+          updateHUDTelemetry();
+        }
+      },
+      {
+        step: 2,
+        category: 'EXOPLANET RECONNAISSANCE',
+        title: 'Real NASA Exoplanet Catalog',
+        badge: 'STEP 2 OF 5: TARGET SELECTION',
+        narrative: 'We target verified candidates from the NASA Exoplanet Archive. From Proxima Centauri b (4.25 LY) to TRAPPIST-1e (40.66 LY) and Kepler-452b, each destination features real astrophysical mass, radius, and equilibrium temperatures.',
+        highlight: 'Curated 6 prime exoplanets rendered with procedural surfaces tailored to terrestrial, water-world, and super-Earth classifications.',
+        cameraPos: new THREE.Vector3(26, 12, -10),
+        cameraLookAt: new THREE.Vector3(14.0, 3.0, -18.0),
+        action: function() {
+          selectPlanetTarget('proxima_b');
+        }
+      },
+      {
+        step: 3,
+        category: 'RELATIVISTIC DYNAMICS',
+        title: 'Relativistic Flight Mechanics & Tsiolkovsky',
+        badge: 'STEP 3 OF 5: PROPULSION & RELATIVITY',
+        narrative: 'Traveling to other stars requires near-light velocities. Breakthrough Starshot utilizes laser radiation pressure (0.20c) without propellant mass overhead. Onboard antimatter and pulsed fusion rockets simulate rigorous relativistic kinetic energy demands.',
+        highlight: 'Live Lorentz gamma derivation: At 0.20c, ship proper time dilates by 2.02%, saving months of subjective travel time.',
+        cameraPos: new THREE.Vector3(12, 10, 15),
+        cameraLookAt: new THREE.Vector3(0, 0, 0),
+        action: function() {
+          missionState.velocityPctC = 20.0;
+          document.getElementById('slider-speed').value = 20.0;
+          updateHUDTelemetry();
+        }
+      },
+      {
+        step: 4,
+        category: 'FLIGHT PHASES & RETRO-FLIP',
+        title: 'Orbital Insertion & 180° Braking Flip',
+        badge: 'STEP 4 OF 5: TRAJECTORY & RETRO-BURN',
+        narrative: 'A fast flyby captures only hours of flyby data. In Orbit Insertion mode, the spacecraft performs a mid-course 180-degree flip maneuver at the half-way threshold, firing magenta retrograde thrusters to brake into planetary orbit.',
+        highlight: 'Dynamic 3D probe model flips orientation on the curved spline with animated retrograde braking thruster plumes.',
+        cameraPos: new THREE.Vector3(16, 8, -6),
+        cameraLookAt: new THREE.Vector3(10, 4, -8),
+        action: function() {
+          setFlightProfile('orbit');
+          missionState.progress = 0.55;
+          updateProbePositionOnSpline();
+          updateHUDTelemetry();
+        }
+      },
+      {
+        step: 5,
+        category: 'TELEMETRY BENCHMARK',
+        title: 'Full Mission Telemetry & Signal Latency',
+        badge: 'STEP 5 OF 5: TELEMETRY & LATENCY',
+        narrative: 'The simulation provides complete flight validation: kinetic energy in megatons TNT, arrival epoch years, and round-trip speed-of-light communication delay (2d/c)—ensuring transparent academic rigor for college symposiums and hackathon judges.',
+        highlight: 'Interactive playback scrubber, warp factors up to 100x, and formula inspector modal with live numerical substitutions.',
+        cameraPos: new THREE.Vector3(30, 25, 30),
+        cameraLookAt: new THREE.Vector3(7, 2, -9),
+        action: function() {
+          missionState.progress = 0.95;
+          updateProbePositionOnSpline();
+          updateHUDTelemetry();
+        }
+      }
+    ];
+
+    let currentTourStep = 0;
+    let tourAutoPlayTimer = null;
+
+    function openPresentationTour() {
+      currentTourStep = 0;
+      document.getElementById('presentation-overlay').classList.remove('hidden');
+      document.getElementById('presentation-overlay').classList.add('flex');
+      sound.playWhoosh();
+      renderTourStep(0);
+    }
+
+    function closePresentationTour() {
+      document.getElementById('presentation-overlay').classList.add('hidden');
+      document.getElementById('presentation-overlay').classList.remove('flex');
+      if (tourAutoPlayTimer) {
+        clearInterval(tourAutoPlayTimer);
+        tourAutoPlayTimer = null;
+        updateTourAutoPlayButtonUI(false);
+      }
+    }
+
+    function renderTourStep(index) {
+      const step = PRESENTATION_STEPS[index];
+      if (!step) return;
+
+      document.getElementById('tour-step-badge').textContent = step.badge;
+      document.getElementById('tour-category-tag').textContent = step.category;
+      document.getElementById('tour-title').textContent = step.title;
+      document.getElementById('tour-narrative').textContent = step.narrative;
+      document.getElementById('tour-highlight-box').innerHTML = '<strong class="text-hudCyan">Key Feature:</strong> ' + step.highlight;
+
+      const dotsContainer = document.getElementById('tour-stepper-dots');
+      dotsContainer.innerHTML = PRESENTATION_STEPS.map(function(s, idx) {
+        const cls = idx === index ? 'bg-hudCyan shadow-[0_0_10px_#00f0ff] scale-125' : 'bg-white/20';
+        return '<div class="w-2.5 h-2.5 rounded-full transition-all duration-300 ' + cls + '"></div>';
+      }).join('');
+
+      tweenCamera(step.cameraPos, step.cameraLookAt, 1600);
+
+      if (typeof step.action === 'function') {
+        step.action();
+      }
+
+      sound.playChirp(750, 0.08);
+    }
+
+    function tweenCamera(targetPos, targetLookAt, duration) {
+      duration = duration || 1500;
+      if (typeof TWEEN !== 'undefined' && TWEEN.Tween) {
+        new TWEEN.Tween(camera.position)
+          .to(targetPos, duration)
+          .easing(TWEEN.Easing.Cubic.Out)
+          .start();
+
+        if (controls) {
+          new TWEEN.Tween(controls.target)
+            .to(targetLookAt, duration)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .start();
+        }
+      } else {
+        camera.position.copy(targetPos);
+        if (controls) controls.target.copy(targetLookAt);
+      }
+    }
+
+    function updateTourAutoPlayButtonUI(isPlaying) {
+      const icon = document.getElementById('tour-auto-icon');
+      const label = document.getElementById('tour-auto-label');
+      if (isPlaying) {
+        icon.textContent = '❚❚';
+        label.textContent = 'PAUSE AUTO';
+      } else {
+        icon.textContent = '▶';
+        label.textContent = 'AUTO-ADVANCE';
+      }
+    }
+
+    function setupEventListeners() {
+      const catalogEl = document.getElementById('planet-catalog');
+      catalogEl.innerHTML = NASA_EXOPLANETS.map(function(p) {
+        const selectedCls = p.id === currentTarget.id ? 'selected' : '';
+        const hzCls = p.habitableZone ? 'text-hudGreen font-semibold' : '';
+        return '<div class="planet-card p-2 rounded border border-white/10 bg-black/40 cursor-pointer ' + selectedCls + '" data-planet-id="' + p.id + '">' +
+          '<div class="flex justify-between items-center text-xs">' +
+            '<span class="font-bold text-white">' + p.name + '</span>' +
+            '<span class="text-hudCyan text-[11px] font-mono">' + p.distanceLY.toFixed(2) + ' LY</span>' +
+          '</div>' +
+          '<div class="flex justify-between items-center text-[10px] text-slate-400 font-mono mt-0.5">' +
+            '<span>' + p.hostStar.split(' ')[0] + '</span>' +
+            '<span class="' + hzCls + '">' + p.surfaceType + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      catalogEl.querySelectorAll('.planet-card').forEach(function(card) {
+        card.addEventListener('click', function() {
+          const pid = card.getAttribute('data-planet-id');
+          selectPlanetTarget(pid);
+        });
+      });
+
+      document.getElementById('profile-flyby').addEventListener('click', function() {
+        setFlightProfile('flyby');
+      });
+      document.getElementById('profile-orbit').addEventListener('click', function() {
+        setFlightProfile('orbit');
+      });
+
+      document.getElementById('propulsion-select').addEventListener('change', function(e) {
+        const key = e.target.value;
+        missionState.propulsion = key;
+        const config = PROPULSION_CONFIGS[key];
+        document.getElementById('propulsion-desc').textContent = config.desc;
+        document.getElementById('propulsion-isp-tag').textContent = 'Isp: ' + config.isp;
+
+        missionState.velocityPctC = config.defaultVelocityPct;
+        missionState.dryMassKg = config.dryMassKg;
+        missionState.payloadMassKg = config.payloadMassKg;
+
+        document.getElementById('slider-speed').value = config.defaultVelocityPct;
+        document.getElementById('slider-dry-mass').value = config.dryMassKg;
+        document.getElementById('slider-payload-mass').value = config.payloadMassKg;
+
+        sound.playChirp(600, 0.05);
+        updateHUDTelemetry();
+      });
+
+      document.getElementById('slider-speed').addEventListener('input', function(e) {
+        missionState.velocityPctC = parseFloat(e.target.value);
+        updateHUDTelemetry();
+      });
+      document.getElementById('slider-dry-mass').addEventListener('input', function(e) {
+        missionState.dryMassKg = parseFloat(e.target.value);
+        updateHUDTelemetry();
+      });
+      document.getElementById('slider-payload-mass').addEventListener('input', function(e) {
+        missionState.payloadMassKg = parseFloat(e.target.value);
+        updateHUDTelemetry();
+      });
+
+      document.getElementById('cam-earth-btn').addEventListener('click', function() {
+        tweenCamera(new THREE.Vector3(7, 4, 9), new THREE.Vector3(0, 0, 0));
+        sound.playChirp(700, 0.04);
+      });
+      document.getElementById('cam-probe-btn').addEventListener('click', function() {
+        if (!probeGroup) return;
+        const p = probeGroup.position.clone();
+        tweenCamera(new THREE.Vector3(p.x + 3, p.y + 2, p.z + 4), p);
+        sound.playChirp(750, 0.04);
+      });
+      document.getElementById('cam-target-btn').addEventListener('click', function() {
+        const dest = currentTarget.scenePos.clone();
+        tweenCamera(new THREE.Vector3(dest.x + 5, dest.y + 3, dest.z + 6), dest);
+        sound.playChirp(800, 0.04);
+      });
+      document.getElementById('cam-overview-btn').addEventListener('click', function() {
+        tweenCamera(new THREE.Vector3(30, 45, 45), new THREE.Vector3(0, 0, 0));
+        sound.playChirp(650, 0.04);
+      });
+
+      document.getElementById('btn-playback-play').addEventListener('click', togglePlayback);
+      document.getElementById('btn-playback-reset').addEventListener('click', function() {
+        missionState.progress = 0.0;
+        missionState.isPlaying = false;
+        togglePlaybackButtonUI(false);
+        updateProbePositionOnSpline();
+        updateHUDTelemetry();
+        sound.playChirp(400, 0.08);
+      });
+
+      document.querySelectorAll('.btn-warp-speed').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          document.querySelectorAll('.btn-warp-speed').forEach(function(b) {
+            b.classList.remove('bg-hudCyan/30', 'text-white', 'font-bold');
+            b.classList.add('text-slate-400');
+          });
+          btn.classList.add('bg-hudCyan/30', 'text-white', 'font-bold');
+          btn.classList.remove('text-slate-400');
+          missionState.warpSpeed = parseFloat(btn.getAttribute('data-warp'));
+          sound.playChirp(900, 0.04);
+        });
+      });
+
+      document.getElementById('trajectory-scrubber-track').addEventListener('click', function(e) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const clickRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        missionState.progress = clickRatio;
+        updateProbePositionOnSpline();
+        updateHUDTelemetry();
+        sound.playChirp(800, 0.04);
+      });
+
+      document.getElementById('btn-toggle-sound').addEventListener('click', function() {
+        const isMuted = sound.toggle();
+        const box = document.getElementById('sound-icon-box');
+        if (isMuted) {
+          box.innerHTML = '<svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" stroke-width="2"/><line x1="23" y1="9" x2="17" y2="15" stroke-width="2"/><line x1="17" y1="9" x2="23" y2="15" stroke-width="2"/></svg>';
+        } else {
+          box.innerHTML = '<svg class="w-4 h-4 text-hudCyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" stroke-width="2"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" stroke-width="2"/></svg>';
+        }
+      });
+
+      document.getElementById('btn-open-math').addEventListener('click', function() {
+        document.getElementById('math-modal').classList.remove('hidden');
+        document.getElementById('math-modal').classList.add('flex');
+        sound.playChirp(600, 0.04);
+      });
+      document.getElementById('btn-close-math').addEventListener('click', function() {
+        document.getElementById('math-modal').classList.add('hidden');
+        document.getElementById('math-modal').classList.remove('flex');
+      });
+      document.getElementById('btn-close-math-footer').addEventListener('click', function() {
+        document.getElementById('math-modal').classList.add('hidden');
+        document.getElementById('math-modal').classList.remove('flex');
+      });
+
+      document.getElementById('btn-start-presentation').addEventListener('click', openPresentationTour);
+      document.getElementById('tour-exit-btn').addEventListener('click', closePresentationTour);
+      document.getElementById('tour-next-btn').addEventListener('click', function() {
+        if (currentTourStep < PRESENTATION_STEPS.length - 1) {
+          currentTourStep++;
+          renderTourStep(currentTourStep);
+        } else {
+          closePresentationTour();
+        }
+      });
+      document.getElementById('tour-prev-btn').addEventListener('click', function() {
+        if (currentTourStep > 0) {
+          currentTourStep--;
+          renderTourStep(currentTourStep);
+        }
+      });
+      document.getElementById('tour-auto-play-btn').addEventListener('click', function() {
+        if (tourAutoPlayTimer) {
+          clearInterval(tourAutoPlayTimer);
+          tourAutoPlayTimer = null;
+          updateTourAutoPlayButtonUI(false);
+        } else {
+          updateTourAutoPlayButtonUI(true);
+          tourAutoPlayTimer = setInterval(function() {
+            if (currentTourStep < PRESENTATION_STEPS.length - 1) {
+              currentTourStep++;
+              renderTourStep(currentTourStep);
+            } else {
+              currentTourStep = 0;
+              renderTourStep(0);
+            }
+          }, 4500);
+        }
+      });
+
+      window.addEventListener('keydown', function(e) {
+        const overlay = document.getElementById('presentation-overlay');
+        if (!overlay.classList.contains('hidden')) {
+          if (e.key === 'ArrowRight' || e.key === ' ') {
+            if (currentTourStep < PRESENTATION_STEPS.length - 1) {
+              currentTourStep++;
+              renderTourStep(currentTourStep);
+            } else {
+              closePresentationTour();
+            }
+          } else if (e.key === 'ArrowLeft') {
+            if (currentTourStep > 0) {
+              currentTourStep--;
+              renderTourStep(currentTourStep);
+            }
+          } else if (e.key === 'Escape') {
+            closePresentationTour();
+          }
+        }
+      });
+    }
+
+    function selectPlanetTarget(planetId) {
+      const p = NASA_EXOPLANETS.find(function(x) { return x.id === planetId; });
+      if (!p) return;
+      currentTarget = p;
+
+      document.querySelectorAll('.planet-card').forEach(function(c) {
+        c.classList.toggle('selected', c.getAttribute('data-planet-id') === p.id);
+      });
+
+      reconstructTrajectoryCurve();
+      updateHUDTelemetry();
+      sound.playChirp(700, 0.05);
+
+      const dest = p.scenePos.clone();
+      tweenCamera(new THREE.Vector3(dest.x + 8, dest.y + 4, dest.z + 10), dest);
+    }
+
+    function setFlightProfile(profile) {
+      missionState.flightProfile = profile;
+      const flybyBtn = document.getElementById('profile-flyby');
+      const orbitBtn = document.getElementById('profile-orbit');
+      const desc = document.getElementById('profile-desc');
+
+      if (profile === 'flyby') {
+        flybyBtn.className = 'py-1.5 px-2 rounded border border-hudCyan bg-hudCyan/20 text-white font-bold text-center text-[11px] transition flex items-center justify-center gap-1';
+        orbitBtn.className = 'py-1.5 px-2 rounded border border-white/10 bg-black/40 text-slate-400 hover:text-white font-bold text-center text-[11px] transition flex items-center justify-center gap-1';
+        desc.textContent = 'High-velocity hyperbolic pass. No deceleration propellant required.';
+      } else {
+        orbitBtn.className = 'py-1.5 px-2 rounded border border-hudMagenta bg-hudMagenta/20 text-white font-bold text-center text-[11px] transition flex items-center justify-center gap-1';
+        flybyBtn.className = 'py-1.5 px-2 rounded border border-white/10 bg-black/40 text-slate-400 hover:text-white font-bold text-center text-[11px] transition flex items-center justify-center gap-1';
+        desc.textContent = 'Performs 180° flip at halfway threshold; fires retrograde thrusters to achieve planetary orbit.';
+      }
+
+      sound.playChirp(680, 0.05);
+      updateProbePositionOnSpline();
+      updateHUDTelemetry();
+    }
+
+    function togglePlayback() {
+      missionState.isPlaying = !missionState.isPlaying;
+      togglePlaybackButtonUI(missionState.isPlaying);
+      if (missionState.isPlaying) sound.playChirp(880, 0.08);
+    }
+
+    function togglePlaybackButtonUI(isPlaying) {
+      const icon = document.getElementById('icon-playback-play');
+      const label = document.getElementById('label-playback-play');
+      if (isPlaying) {
+        icon.textContent = '❚❚';
+        label.textContent = 'PAUSE TRANSIT';
+      } else {
+        icon.textContent = '▶';
+        label.textContent = 'RESUME TRANSIT';
+      }
+    }
+
+    const animClock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = animClock.getDelta();
+      if (typeof TWEEN !== 'undefined' && TWEEN.update) {
+        TWEEN.update();
+      }
+
+      if (earthMesh) earthMesh.rotation.y += 0.002;
+      if (atmosphereMesh) atmosphereMesh.rotation.y += 0.0025;
+      if (moonMesh) moonMesh.rotation.y += 0.003;
+
+      planetObjects.forEach(function(group) {
+        if (group.children[0]) {
+          group.children[0].rotation.y += 0.004;
+        }
+      });
+
+      if (missionState.isPlaying) {
+        const step = 0.015 * missionState.warpSpeed * delta;
+        missionState.progress += step;
+
+        if (missionState.progress >= 1.0) {
+          missionState.progress = 1.0;
+          missionState.isPlaying = false;
+          togglePlaybackButtonUI(false);
+          sound.playChirp(1100, 0.25);
+        }
+
+        updateProbePositionOnSpline();
+        updateHUDTelemetry();
+      }
+
+      if (controls) controls.update();
+      if (renderer && scene && camera) {
+        renderer.render(scene, camera);
+      }
+    }
+
+    function initApp() {
+      try {
+        init3DViewport();
+        setupEventListeners();
+        updateHUDTelemetry();
+        animate();
+      } catch (err) {
+        console.error('Initialization error:', err);
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initApp);
+    } else {
+      initApp();
+    }
+  </script>
+</body>
+</html>
